@@ -64,7 +64,7 @@ use wayland_protocols::wp::presentation_time::server::wp_presentation_feedback;
 use super::{IpcOutputMap, RenderResult};
 use crate::backend::OutputId;
 use crate::frame_clock::FrameClock;
-use crate::niri::{Niri, RedrawState, State};
+use crate::niri::{redraw_stats, Niri, RedrawState, State};
 use crate::render_helpers::debug::draw_damage;
 use crate::render_helpers::renderer::AsGlesRenderer;
 use crate::render_helpers::{resources, shaders, RenderCtx, RenderTarget};
@@ -1805,6 +1805,7 @@ impl Tty {
 
     fn on_estimated_vblank_timer(&self, niri: &mut Niri, output: Output) {
         let span = tracy_client::span!("Tty::on_estimated_vblank_timer");
+        redraw_stats::bump(&redraw_stats::VBLANK_TIMERS_FIRED);
 
         let name = output.name();
         span.emit_text(&name);
@@ -3036,6 +3037,7 @@ fn queue_estimated_vblank_timer(
         })
         .unwrap();
     output_state.redraw_state = RedrawState::WaitingForEstimatedVBlank(token);
+    redraw_stats::bump(&redraw_stats::VBLANK_TIMERS_QUEUED);
 }
 
 pub fn calculate_drm_mode_from_modeline(modeline: &Modeline) -> anyhow::Result<DrmMode> {
