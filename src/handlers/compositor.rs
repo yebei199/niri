@@ -20,7 +20,7 @@ use smithay::wayland::shm::{ShmHandler, ShmState};
 use super::xdg_shell::add_mapped_toplevel_pre_commit_hook;
 use crate::handlers::XDG_ACTIVATION_TOKEN_TIMEOUT;
 use crate::layout::{ActivateWindow, AddWindowTarget, LayoutElement as _};
-use crate::niri::{CastTarget, ClientState, LockState, State};
+use crate::niri::{redraw_stats, CastTarget, ClientState, LockState, State};
 use crate::utils::transaction::Transaction;
 use crate::utils::{is_mapped, send_scale_transform};
 use crate::window::{InitialConfigureState, Mapped, ResolvedWindowRules, Unmapped};
@@ -55,6 +55,7 @@ impl CompositorHandler for State {
 
     fn commit(&mut self, surface: &WlSurface) {
         let _span = tracy_client::span!("CompositorHandler::commit");
+        redraw_stats::bump(&redraw_stats::SURFACE_COMMITS);
         let _span = trace_span!("commit", surface = %surface.id()).entered();
         trace!("commit");
 

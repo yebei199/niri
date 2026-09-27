@@ -31,8 +31,8 @@ use smithay::backend::egl::{EGLDevice, EGLDisplay};
 use smithay::backend::libinput::{LibinputInputBackend, LibinputSessionInterface};
 use smithay::backend::renderer::gles::GlesRenderer;
 use smithay::backend::renderer::multigpu::gbm::GbmGlesBackend;
-use smithay::backend::renderer::multigpu::{GpuManager, MultiFrame, MultiRenderer};
-use smithay::backend::renderer::{DebugFlags, ImportDma, ImportEgl, RendererSuper};
+use smithay::backend::renderer::multigpu::{ApiDevice, GpuManager, MultiFrame, MultiRenderer};
+use smithay::backend::renderer::{DebugFlags, ImportDma, ImportEgl, Renderer, RendererSuper};
 use smithay::backend::session::libseat::LibSeatSession;
 use smithay::backend::session::{Event as SessionEvent, Session};
 use smithay::backend::udev::{self, UdevBackend, UdevEvent};
@@ -64,7 +64,7 @@ use wayland_protocols::wp::presentation_time::server::wp_presentation_feedback;
 use super::{IpcOutputMap, RenderResult};
 use crate::backend::OutputId;
 use crate::frame_clock::FrameClock;
-use crate::niri::{Niri, RedrawState, State};
+use crate::niri::{redraw_stats, Niri, RedrawState, State};
 use crate::render_helpers::debug::draw_damage;
 use crate::render_helpers::renderer::AsGlesRenderer;
 use crate::render_helpers::{resources, shaders, RenderCtx, RenderTarget};
@@ -1805,6 +1805,7 @@ impl Tty {
 
     fn on_estimated_vblank_timer(&self, niri: &mut Niri, output: Output) {
         let span = tracy_client::span!("Tty::on_estimated_vblank_timer");
+        redraw_stats::bump(&redraw_stats::VBLANK_TIMERS_FIRED);
 
         let name = output.name();
         span.emit_text(&name);
@@ -1857,6 +1858,28 @@ impl Tty {
             .single_renderer(&self.primary_render_node)
             .ok()
             .map(|_| self.primary_render_node)
+    }
+
+    pub fn cleanup_texture_cache(&mut self) {
+        let devices = match self.gpu_manager.devices_mut() {
+            Ok(devices) => devices,
+            Err(err) => {
+                warn!(
+                    ?err,
+                    "error enumerating renderers for texture cache cleanup"
+                );
+                return;
+            }
+        };
+
+        // Imports can reside on a non-primary GPU. Clean every device, and do
+        // not let an error on one prevent cleanup of the remaining devices.
+        for device in devices {
+            let node = *device.node();
+            if let Err(err) = device.renderer_mut().cleanup_texture_cache() {
+                warn!(?node, ?err, "error cleaning up renderer texture cache");
+            }
+        }
     }
 
     pub fn render(
@@ -3014,6 +3037,7 @@ fn queue_estimated_vblank_timer(
         })
         .unwrap();
     output_state.redraw_state = RedrawState::WaitingForEstimatedVBlank(token);
+    redraw_stats::bump(&redraw_stats::VBLANK_TIMERS_QUEUED);
 }
 
 pub fn calculate_drm_mode_from_modeline(modeline: &Modeline) -> anyhow::Result<DrmMode> {

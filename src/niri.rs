@@ -677,6 +677,121 @@ impl RedrawState {
     }
 }
 
+/// Counters for the redraw loop, for diagnosing the memory climb with monitors off.
+///
+/// See <https://github.com/niri-wm/niri/issues/3295>. With monitors off, `Niri::redraw()` skips
+/// the backend render, but still updates render elements and sends frame callbacks, and the TTY
+/// backend's estimated-vblank timer is skipped along with the render. Reading the code cannot tell
+/// us how fast that loop actually spins, or who feeds it; these counters can.
+///
+/// Every counter is a relaxed atomic increment on the compositor thread: no locking, no
+/// allocation, no ordering constraints, so the timing of the paths being measured is unchanged.
+/// Only the periodic report formats anything, and it runs off its own timer, outside the redraw
+/// path.
+pub mod redraw_stats {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::Duration;
+
+    use super::{Niri, RedrawState};
+    use crate::utils::get_monotonic_time;
+
+    /// How often the periodic report is logged.
+    pub const REPORT_INTERVAL: Duration = Duration::from_secs(10);
+
+    /// Surface commits received from clients.
+    pub static SURFACE_COMMITS: AtomicU64 = AtomicU64::new(0);
+    /// Calls into `Niri::redraw()`.
+    pub static REDRAWS: AtomicU64 = AtomicU64::new(0);
+    /// Frame callbacks sent to surfaces.
+    pub static FRAME_CALLBACKS: AtomicU64 = AtomicU64::new(0);
+    /// Estimated-vblank timers inserted into the event loop.
+    pub static VBLANK_TIMERS_QUEUED: AtomicU64 = AtomicU64::new(0);
+    /// Estimated-vblank timers that fired.
+    pub static VBLANK_TIMERS_FIRED: AtomicU64 = AtomicU64::new(0);
+
+    #[inline]
+    pub fn bump(counter: &AtomicU64) {
+        counter.fetch_add(1, Ordering::Relaxed);
+    }
+
+    #[derive(Default, Clone, Copy)]
+    pub struct Snapshot {
+        commits: u64,
+        redraws: u64,
+        frame_callbacks: u64,
+        vblank_timers_queued: u64,
+        vblank_timers_fired: u64,
+    }
+
+    impl Snapshot {
+        pub fn take() -> Self {
+            Self {
+                commits: SURFACE_COMMITS.load(Ordering::Relaxed),
+                redraws: REDRAWS.load(Ordering::Relaxed),
+                frame_callbacks: FRAME_CALLBACKS.load(Ordering::Relaxed),
+                vblank_timers_queued: VBLANK_TIMERS_QUEUED.load(Ordering::Relaxed),
+                vblank_timers_fired: VBLANK_TIMERS_FIRED.load(Ordering::Relaxed),
+            }
+        }
+    }
+
+    /// Logs the counters and the per-output redraw state, then updates `prev` for the next report.
+    ///
+    /// Timestamps are monotonic-clock seconds, the same clock the rest of niri uses, so the report
+    /// can be lined up with external samplers.
+    pub fn log_report(niri: &Niri, prev: &mut Snapshot) {
+        let now = Snapshot::take();
+        let time = get_monotonic_time().as_secs_f64();
+
+        info!(
+            "redraw-stats t={time:.3} monitors_active={} commits={} (+{}) redraws={} (+{}) \
+             frame_callbacks={} (+{}) vblank_timers_queued={} (+{}) vblank_timers_fired={} (+{})",
+            niri.monitors_active,
+            now.commits,
+            now.commits - prev.commits,
+            now.redraws,
+            now.redraws - prev.redraws,
+            now.frame_callbacks,
+            now.frame_callbacks - prev.frame_callbacks,
+            now.vblank_timers_queued,
+            now.vblank_timers_queued - prev.vblank_timers_queued,
+            now.vblank_timers_fired,
+            now.vblank_timers_fired - prev.vblank_timers_fired,
+        );
+
+        for (output, state) in &niri.output_state {
+            info!(
+                "redraw-stats t={time:.3} monitors_active={} output={} redraw_state={} \
+                 unfinished_animations_remain={} frame_callback_sequence={}",
+                niri.monitors_active,
+                output.name(),
+                redraw_state_name(&state.redraw_state),
+                state.unfinished_animations_remain,
+                state.frame_callback_sequence,
+            );
+        }
+
+        *prev = now;
+    }
+
+    fn redraw_state_name(state: &RedrawState) -> &'static str {
+        match state {
+            RedrawState::Idle => "idle",
+            RedrawState::Queued => "queued",
+            RedrawState::WaitingForVBlank {
+                redraw_needed: false,
+            } => "waiting-for-vblank",
+            RedrawState::WaitingForVBlank {
+                redraw_needed: true,
+            } => "waiting-for-vblank-and-queued",
+            RedrawState::WaitingForEstimatedVBlank(_) => "waiting-for-estimated-vblank",
+            RedrawState::WaitingForEstimatedVBlankAndQueued(_) => {
+                "waiting-for-estimated-vblank-and-queued"
+            }
+        }
+    }
+}
+
 impl Default for SurfaceFrameThrottlingState {
     fn default() -> Self {
         Self {
@@ -2573,9 +2688,24 @@ impl Niri {
                 Timer::from_duration(Duration::from_secs(1)),
                 |_, _, state| {
                     state.niri.send_frame_callbacks_on_fallback_timer();
+                    // Cache maintenance must not depend on frame production:
+                    // there may be no active outputs, but clients can still
+                    // import and destroy buffers. Only dead entries are freed;
+                    // live surface textures and frame callback policy stay intact.
+                    state.backend.cleanup_texture_cache();
                     TimeoutAction::ToDuration(Duration::from_secs(1))
                 },
             )
+            .unwrap();
+
+        event_loop
+            .insert_source(Timer::from_duration(redraw_stats::REPORT_INTERVAL), {
+                let mut prev = redraw_stats::Snapshot::default();
+                move |_, _, state| {
+                    redraw_stats::log_report(&state.niri, &mut prev);
+                    TimeoutAction::ToDuration(redraw_stats::REPORT_INTERVAL)
+                }
+            })
             .unwrap();
 
         let socket_name = create_wayland_socket.then(|| {
@@ -4738,6 +4868,7 @@ impl Niri {
 
     fn redraw(&mut self, backend: &mut Backend, output: &Output) {
         let _span = tracy_client::span!("Niri::redraw");
+        redraw_stats::bump(&redraw_stats::REDRAWS);
 
         // Verify our invariant.
         let state = self.output_state.get_mut(output).unwrap();
@@ -5208,6 +5339,7 @@ impl Niri {
 
             if send {
                 *last_sent_at = Some((output.clone(), sequence));
+                redraw_stats::bump(&redraw_stats::FRAME_CALLBACKS);
                 Some(output.clone())
             } else {
                 None
