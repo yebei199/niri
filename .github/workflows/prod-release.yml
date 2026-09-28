@@ -1,0 +1,51 @@
+name: Publish prod release tarball
+
+on:
+  push:
+    branches:
+      - prod
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y curl gcc clang libudev-dev libgbm-dev libxkbcommon-dev libegl1-mesa-dev libwayland-dev libinput-dev libdbus-1-dev libsystemd-dev libseat-dev libpipewire-0.3-dev libpango1.0-dev libdisplay-info-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+
+      - name: Build release
+        run: cargo build --release --locked
+
+      - name: Package release tarball
+        id: package
+        run: .github/scripts/package-release.sh
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: prod-${{ steps.package.outputs.sha7 }}
+          name: prod-${{ steps.package.outputs.sha7 }}
+          body_path: ${{ steps.package.outputs.notes_path }}
+          files: ${{ steps.package.outputs.tarball_path }}
+          fail_on_unmatched_files: true
