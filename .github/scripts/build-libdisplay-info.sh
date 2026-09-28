@@ -5,6 +5,11 @@
 # libdisplay-info-dev shipped by Ubuntu noble, which gives .so.1 — see issue #4
 # rework F-001). Do not `apt-get install libdisplay-info-dev` alongside this:
 # it would make pkg-config's resolution version-dependent on install order.
+#
+# Needs `hwdata` installed (its meson.build reads /usr/share/hwdata/pnp.ids for
+# the vendor-ID table; there's no pkg-config file for it on Ubuntu, so its
+# meson dependency lookup falls through to that hardcoded path — apt's hwdata
+# package puts the file there).
 set -euo pipefail
 
 version=0.3.0
