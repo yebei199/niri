@@ -57,6 +57,17 @@ sha256_hex="$(sha256sum "$tarball_path" | awk '{print $1}')"
 sha256_nix="$(nix-prefetch-url --type sha256 "file://$(realpath "$tarball_path")" 2>/dev/null)"
 
 needed="$(readelf -d "$stage_dir/bin/niri" | grep NEEDED)"
+
+# nixos_config's nixpkgs only ships a provider for libdisplay-info.so.3
+# (libdisplay-info_0_3); linking any other soname (e.g. Ubuntu noble's
+# libdisplay-info-dev apt package gives .so.1) leaves autoPatchelf unable to
+# resolve the dependency on the target machine (issue #4 rework F-001).
+libdisplay_info_sonames="$(printf '%s\n' "$needed" | grep -oE 'libdisplay-info\.so\.[0-9]+' | sort -u)"
+if [ "$libdisplay_info_sonames" != "libdisplay-info.so.3" ]; then
+    echo "error: bin/niri must link exactly libdisplay-info.so.3, found: ${libdisplay_info_sonames:-none}" >&2
+    exit 1
+fi
+
 # Not `ldd --version | head -1`: under `set -o pipefail`, head closing the
 # pipe after its first line can send ldd a SIGPIPE, intermittently exiting
 # this whole script with 141.
