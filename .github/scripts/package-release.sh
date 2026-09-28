@@ -36,7 +36,9 @@ mkdir -p \
     "$stage_dir/share/nushell/vendor/autoload"
 
 install -Dm755 "$bin" "$stage_dir/bin/niri"
-strip -s "$stage_dir/bin/niri"
+# -s alone leaves .debug_gdb_scripts (a gdb auto-load note, not a symbol
+# table); remove it explicitly so no .debug_* section survives.
+strip -s -R .debug_gdb_scripts "$stage_dir/bin/niri"
 
 install -Dm755 resources/niri-session "$stage_dir/bin/niri-session"
 
@@ -55,7 +57,10 @@ sha256_hex="$(sha256sum "$tarball_path" | awk '{print $1}')"
 sha256_nix="$(nix-prefetch-url --type sha256 "file://$(realpath "$tarball_path")" 2>/dev/null)"
 
 needed="$(readelf -d "$stage_dir/bin/niri" | grep NEEDED)"
-glibc_version="$(ldd --version | head -1)"
+# Not `ldd --version | head -1`: under `set -o pipefail`, head closing the
+# pipe after its first line can send ldd a SIGPIPE, intermittently exiting
+# this whole script with 141.
+glibc_version="$(getconf GNU_LIBC_VERSION)"
 
 {
     echo "- 源提交: \`$sha_full\`"
