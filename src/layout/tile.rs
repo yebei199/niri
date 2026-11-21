@@ -1001,21 +1001,23 @@ impl<W: LayoutElement> Tile<W> {
         animate: bool,
         transaction: Option<Transaction>,
     ) {
-        self.window.request_size(
-            size.to_i32_round(),
-            SizingMode::Maximized,
-            animate,
-            transaction,
-        );
+        let size = size.to_i32_round();
+        let rules = self.window.rules();
+        let size = rules.apply_max_size(size);
+        let size = rules.apply_min_size(size);
+
+        self.window
+            .request_size(size, SizingMode::Maximized, animate, transaction);
     }
 
     pub fn request_fullscreen(&mut self, animate: bool, transaction: Option<Transaction>) {
-        self.window.request_size(
-            self.view_size.to_i32_round(),
-            SizingMode::Fullscreen,
-            animate,
-            transaction,
-        );
+        let size = self.view_size.to_i32_round();
+        let rules = self.window.rules();
+        let size = rules.apply_max_size(size);
+        let size = rules.apply_min_size(size);
+
+        self.window
+            .request_size(size, SizingMode::Fullscreen, animate, transaction);
     }
 
     pub fn min_size_nonfullscreen(&self) -> Size<f64, Logical> {
@@ -1364,6 +1366,10 @@ impl<W: LayoutElement> Tile<W> {
         focus_ring: bool,
         push: &mut dyn FnMut(TileRenderElement<R>),
     ) {
+        if ctx.target.should_hide(self.window.rules().block_out_from) {
+            return;
+        }
+
         let _span = tracy_client::span!("Tile::render");
 
         let scale = Scale::from(self.scale);
