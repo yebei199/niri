@@ -8,8 +8,8 @@ logic can also be run and checked locally.
   output into the nixpkgs-niri-package layout (bin/, share/wayland-sessions, etc.),
   strips the binary, generates shell completions, tars it as
   `niri-prod-<sha7>-x86_64-linux.tar.xz`, and writes release notes with the tarball's
-  sha256 (hex and nix formats), `bin/niri`'s NEEDED library list, and the build glibc
-  version. Used by the `prod` release workflow; does not build niri itself, so it can
+  sha256 (hex and nix formats), `bin/niri`'s NEEDED library list, and the newest glibc
+  symbol version it needs. Used by the `prod` release workflow; does not build niri itself, so it can
   be re-run against a local release build to check the tarball before pushing. Fails
   (non-zero exit) if `bin/niri`'s NEEDED list doesn't contain exactly
   `libdisplay-info.so.3`, since any other soname means nixos_config can't resolve it.
@@ -19,5 +19,5 @@ anything not tied to a GitHub Actions workflow.
 
 Depends on: a `target/release/niri` binary already built in the flake's dev shell (its
 libdisplay-info is 0.3, soname `.so.3`; its glibc must not be newer than nixos_config's,
-which the release notes' build glibc line shows), `nix-prefetch-url` (from Nix) being on
-`PATH` for the nix-format hash, and `readelf`/`strip`/`getconf` (from the dev shell).
+which the release notes' glibc line shows), `nix-prefetch-url` (from Nix) being on
+`PATH` for the nix-format hash, and `readelf`/`strip`/`objdump` (from the dev shell).

@@ -68,10 +68,10 @@ if [ "$libdisplay_info_sonames" != "libdisplay-info.so.3" ]; then
     exit 1
 fi
 
-# Not `ldd --version | head -1`: under `set -o pipefail`, head closing the
-# pipe after its first line can send ldd a SIGPIPE, intermittently exiting
-# this whole script with 141.
-glibc_version="$(getconf GNU_LIBC_VERSION)"
+# The newest glibc symbol version bin/niri needs: nixos_config's glibc must be
+# at least this. Not the build machine's glibc (getconf reports whichever
+# glibc is first on PATH, not the one the binary was linked against).
+glibc_version="$(objdump -T "$stage_dir/bin/niri" | grep -oE 'GLIBC_[0-9.]+' | sort -Vu | tail -n 1)"
 
 {
     echo "- 源提交: \`$sha_full\`"
@@ -82,7 +82,7 @@ glibc_version="$(getconf GNU_LIBC_VERSION)"
     echo '```'
     echo "$needed"
     echo '```'
-    echo "- 构建 glibc: \`$glibc_version\`"
+    echo "- 需要 glibc ≥ \`${glibc_version#GLIBC_}\`"
 } > "$notes_path"
 
 if [ -n "${GITHUB_OUTPUT:-}" ]; then
