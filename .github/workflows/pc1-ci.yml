@@ -1,0 +1,31 @@
+name: CI (pc1)
+
+# Upstream's ci.yml runs on GitHub-hosted runners, which stopped starting jobs for this account on
+# 2026-11-20; it is disabled here and kept unchanged for merges from upstream. This runs the checks
+# that matter for prod on the self-hosted pc1 runner. No pull_request trigger: a public repo must not
+# run code from other people's pull requests on a self-hosted machine.
+on:
+  push:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: [self-hosted, pc1]
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+
+      - name: Rustfmt
+        run: nix develop --command cargo fmt --all -- --check
+
+      - name: Clippy
+        run: nix develop --command cargo clippy --all --all-targets
+
+      - name: Test
+        run: nix develop --command cargo test --all --exclude niri-visual-tests
