@@ -56,6 +56,7 @@ window-rule {
     // block-out-from "screen-capture"
     // block-out-from "screen-capture" kind="hide"
     variable-refresh-rate true
+    frame-callbacks-when-hidden true
     default-column-display "tabbed"
     default-floating-position x=100 y=200 relative-to="bottom-left"
     scroll-factor 0.75
@@ -711,6 +712,23 @@ This mode will work even when there are overlays over the fullscreen window.
 // Enable on-demand VRR when any window is fullscreen.
 window-rule {
     variable-refresh-rate "fullscreen-only"
+}
+```
+
+#### `frame-callbacks-when-hidden`
+
+<sup>Since: next release</sup>
+
+If set to true, niri keeps sending this window frame callbacks at 60 Hz while it is not displayed: on an inactive workspace, scrolled out of view, behind the lock screen, or with monitors powered off.
+Otherwise such a window gets at most one frame callback per second, and none at all with monitors powered off, so clients that draw only on frame callbacks (like Chromium) stop running their `requestAnimationFrame` and similar work.
+
+Use it for windows that must keep working unattended, at the cost of the power that drawing them takes.
+
+```kdl
+window-rule {
+    match app-id="^kiosk-browser$"
+
+    frame-callbacks-when-hidden true
 }
 ```
 
