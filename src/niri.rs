@@ -206,6 +206,26 @@ const CLEAR_COLOR_LOCKED: [f32; 4] = [0.3, 0.1, 0.1, 1.];
 // should be ~1.995 seconds.
 const FRAME_CALLBACK_THROTTLE: Option<Duration> = Some(Duration::from_millis(995));
 
+// Windows with the frame-callbacks-when-hidden rule get frame callbacks at this interval while they
+// are not displayed: on an inactive workspace, scrolled out of view, behind the lock screen, or
+// with monitors powered off.
+const HIDDEN_FRAME_CALLBACK_INTERVAL: Duration = Duration::from_micros(16_667);
+
+/// Makes up an output for sending frame callbacks to surfaces that aren't on any output; only the
+/// throttling timer matters for those.
+fn bogus_output() -> Output {
+    Output::new(
+        String::new(),
+        PhysicalProperties {
+            size: Size::from((0, 0)),
+            subpixel: Subpixel::Unknown,
+            make: String::new(),
+            model: String::new(),
+            serial_number: String::new(),
+        },
+    )
+}
+
 /// Parts of the seat keyboard state that get reset when its keymap is replaced.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SavedKeyboardState {
@@ -2809,6 +2829,20 @@ impl Niri {
                 |_, _, state| {
                     state.niri.send_frame_callbacks_on_fallback_timer();
                     TimeoutAction::ToDuration(Duration::from_secs(1))
+                },
+            )
+            .unwrap();
+
+        event_loop
+            .insert_source(
+                Timer::from_duration(HIDDEN_FRAME_CALLBACK_INTERVAL),
+                |_, _, state| {
+                    let next = if state.niri.send_frame_callbacks_to_hidden_windows() {
+                        HIDDEN_FRAME_CALLBACK_INTERVAL
+                    } else {
+                        Duration::from_secs(1)
+                    };
+                    TimeoutAction::ToDuration(next)
                 },
             )
             .unwrap();
@@ -5594,6 +5628,50 @@ impl Niri {
         }
     }
 
+    /// Sends frame callbacks to windows with the frame-callbacks-when-hidden rule that are not
+    /// displayed. Displayed windows get theirs from the output redraw.
+    ///
+    /// Returns whether any window has the rule.
+    pub fn send_frame_callbacks_to_hidden_windows(&mut self) -> bool {
+        let _span = tracy_client::span!("Niri::send_frame_callbacks_to_hidden_windows");
+
+        let monitors_active = self.monitors_active;
+        let frame_callback_time = get_monotonic_time();
+        let mut no_output = None;
+        let mut any = false;
+
+        self.layout.with_windows_mut(|mapped, output| {
+            if mapped.rules().frame_callbacks_when_hidden != Some(true) {
+                return;
+            }
+            any = true;
+
+            // Without active monitors nothing is drawn, whatever the last render left here.
+            let surface = mapped.toplevel().wl_surface();
+            let displayed = monitors_active
+                && with_states(surface, |states| {
+                    surface_primary_scanout_output(surface, states).is_some()
+                });
+            if displayed {
+                return;
+            }
+
+            let output = match output {
+                Some(output) => output.clone(),
+                None => no_output.get_or_insert_with(bogus_output).clone(),
+            };
+            // The timer paces these, so don't throttle on top of it.
+            mapped.send_frame(
+                &output,
+                frame_callback_time,
+                Some(Duration::ZERO),
+                |_, _| None,
+            );
+        });
+
+        any
+    }
+
     pub fn send_frame_callbacks_on_fallback_timer(&mut self) {
         if !self.monitors_active || self.output_state.is_empty() {
             return;
@@ -5601,18 +5679,7 @@ impl Niri {
 
         let _span = tracy_client::span!("Niri::send_frame_callbacks_on_fallback_timer");
 
-        // Make up a bogus output; we don't care about it here anyway, just the throttling timer.
-        let output = Output::new(
-            String::new(),
-            PhysicalProperties {
-                size: Size::from((0, 0)),
-                subpixel: Subpixel::Unknown,
-                make: String::new(),
-                model: String::new(),
-                serial_number: String::new(),
-            },
-        );
-        let output = &output;
+        let output = &bogus_output();
 
         let frame_callback_time = get_monotonic_time();
 

@@ -117,6 +117,9 @@ pub struct ResolvedWindowRules {
     /// Whether to enable VRR on this window's primary output if it is on-demand.
     pub variable_refresh_rate: Option<VrrRule>,
 
+    /// Whether to keep sending frame callbacks at full rate while the window is not displayed.
+    pub frame_callbacks_when_hidden: Option<bool>,
+
     /// Multiplier for all scroll events sent to this window.
     pub scroll_factor: Option<f64>,
 
@@ -305,6 +308,9 @@ impl ResolvedWindowRules {
                 }
                 if let Some(x) = rule.variable_refresh_rate {
                     resolved.variable_refresh_rate = Some(x);
+                }
+                if let Some(x) = rule.frame_callbacks_when_hidden {
+                    resolved.frame_callbacks_when_hidden = Some(x);
                 }
                 if let Some(x) = rule.scroll_factor {
                     resolved.scroll_factor = Some(x.0);

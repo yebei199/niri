@@ -70,6 +70,8 @@ pub struct WindowRule {
     pub block_out_from: Option<BlockOutFrom>,
     #[knuffel(child, unwrap(argument))]
     pub variable_refresh_rate: Option<VrrRule>,
+    #[knuffel(child, unwrap(argument))]
+    pub frame_callbacks_when_hidden: Option<bool>,
     #[knuffel(child, unwrap(argument, str))]
     pub default_column_display: Option<ColumnDisplay>,
     #[knuffel(child)]

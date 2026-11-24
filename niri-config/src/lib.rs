@@ -1384,6 +1384,7 @@ mod tests {
                 default-floating-position x=100 y=-200 relative-to="bottom-left"
                 on-xdg-activate "ignore"
                 variable-refresh-rate "fullscreen-only"
+                frame-callbacks-when-hidden true
 
                 focus-ring {
                     off
@@ -2387,6 +2388,9 @@ mod tests {
                     block_out_from: None,
                     variable_refresh_rate: Some(
                         FullscreenOnly,
+                    ),
+                    frame_callbacks_when_hidden: Some(
+                        true,
                     ),
                     default_column_display: Some(
                         Tabbed,

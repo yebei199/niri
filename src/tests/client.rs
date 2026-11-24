@@ -498,6 +498,16 @@ impl Window {
         self.xdg_toplevel.set_parent(parent);
     }
 
+    pub fn set_app_id(&self, app_id: &str) {
+        self.xdg_toplevel.set_app_id(app_id.to_owned());
+    }
+
+    pub fn frame(&self) -> Arc<SyncData> {
+        let data = Arc::new(SyncData::default());
+        self.surface.frame(&self.qh, data.clone());
+        data
+    }
+
     pub fn set_title(&self, title: &str) {
         self.xdg_toplevel.set_title(title.to_owned());
     }
